@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд дефектов дорожных объектов</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{--blue:#2563eb;--green:#16a34a;--red:#dc2626;--amber:#d97706;--bg:#f1f5f9;--card:#fff;--txt:#0f172a;--mut:#64748b;--brd:#e2e8f0}
+  *{box-sizing:border-box} body{margin:0;font:14px/1.45 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--txt)}
+  header{background:#fff;border-bottom:1px solid var(--brd);padding:12px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+  header h1{font-size:18px;margin:0}
+  .layout{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:16px 20px}
+  @media(max-width:1000px){.layout{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  .card.wide{grid-column:1/-1}                 /* карточка на всю ширину основной области */
+  .panel h3{margin:0 0 10px;font-size:15px}
+  .panel label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+  .panel select,.panel input[type=date]{width:100%;padding:6px 8px;border:1px solid var(--brd);border-radius:8px;background:#fff;font-size:13px}
+  .panel select[multiple]{height:110px}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  .btn{border:1px solid var(--brd);background:#fff;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn:hover{filter:brightness(.96)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .chip{border:1px solid var(--brd);background:#eef2ff;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:#fff;border:1px solid var(--brd);border-radius:12px;padding:12px 16px}
+  .kpi .t{font-size:12px;color:var(--mut)} .kpi .v{font-size:26px;font-weight:700;margin-top:2px}
+  .kpi .v.green{color:var(--green)} .kpi .v.red{color:var(--red)} .kpi .v.blue{color:var(--blue)}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:16px}
+  .chartbox{position:relative;height:320px}
+  .chartbox.tall{height:380px}
+  h2.cardtitle{font-size:15px;margin:0 0 10px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:7px 10px;border-bottom:1px solid var(--brd);text-align:right} th:first-child,td:first-child{text-align:left}
+  thead th{background:#f8fafc;position:sticky;top:0}
+  .note{font-size:12px;color:var(--mut);margin-top:8px}
+  .muted{color:var(--mut);font-size:12px}
+  .drop{border:2px dashed var(--brd);border-radius:10px;padding:14px;text-align:center;color:var(--mut);cursor:pointer}
+  .drop.hover{border-color:var(--blue);background:#eff6ff}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .pill{background:#eef2ff;border-radius:8px;padding:6px 10px;font-size:12px}
+  details summary{cursor:pointer}
+  /* ===== ТОП-СПИСКИ (широкие, без обрезки наименований) ===== */
+  .toplist{display:flex;flex-direction:column;gap:9px;max-height:420px;overflow:auto;padding-right:4px}
+  .tl-row{display:flex;gap:10px;align-items:center}
+  .tl-rank{width:24px;height:24px;border-radius:7px;background:#eef2ff;color:var(--blue);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+  .tl-row:nth-child(-n+3) .tl-rank{background:var(--blue);color:#fff}
+  .tl-main{flex:1;min-width:0}
+  .tl-name{font-size:13px;white-space:normal;overflow-wrap:break-word}   /* перенос по словам, без многоточия */
+  .tl-bar{height:6px;background:#e2e8f0;border-radius:4px;margin:4px 0;overflow:hidden}
+  .tl-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--green));border-radius:4px}
+  .tl-sub{font-size:11px;color:var(--mut)}
+  .tl-val{font-weight:700;font-size:16px;flex:none;min-width:40px;text-align:right}
+  @media print{
+    aside.panel,header .toolbar{display:none!important}
+    .layout{grid-template-columns:1fr!important;padding:0!important;gap:10px}
+    body{background:#fff}
+    .card{box-shadow:none;break-inside:avoid;border:none}
+    .chartbox{height:260px}
+    .toplist{max-height:none;overflow:visible}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    @page{margin:10mm}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Дашборд дефектов СКПДИ</h1>
+  <div class="toolbar">
+    <span class="pill" id="recInfo">Файл не загружен</span>
+    <button class="btn" id="btnPrint">🖨 Печать</button>
+    <button class="btn" id="btnDemo">Демо-данные</button>
+    <button class="btn" id="btnCsv">Экспорт выборки (CSV)</button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ПАНЕЛЬ ФИЛЬТРОВ -->
+  <aside class="card panel">
+    <h3>Фильтры</h3>
+    <div class="drop" id="drop">📂 Выберите файл .xlsx / .xls<br><span class="muted">или перетащите его сюда</span>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
+
+    <label>Период, за который строится дашборд</label>
+    <div class="row"><input type="date" id="dFrom"><input type="date" id="dTo"></div>
+    <div class="chips" id="presets">
+      <span class="chip" data-p="7">7 дней</span><span class="chip" data-p="30">30 дней</span>
+      <span class="chip" data-p="m">Месяц</span><span class="chip" data-p="q">Квартал</span>
+      <span class="chip" data-p="y">Год</span><span class="chip on" data-p="all">Всё время</span>
+    </div>
+
+    <label>Фильтр по дате (база выборки)</label>
+    <select id="mode">
+      <option value="any">Любое событие в периоде (поступление ИЛИ устранение)</option>
+      <option value="in">Только выявленные в периоде</option>
+      <option value="out">Только устранённые (факт) в периоде</option>
+    </select>
+
+    <label>Территориальный отдел <span style="float:right"><a href="#" data-all="fDept">все</a> / <a href="#" data-none="fDept">сброс</a></span></label>
+    <select id="fDept" multiple></select>
+
+    <label>Исполнитель <span style="float:right"><a href="#" data-all="fExec">все</a> / <a href="#" data-none="fExec">сброс</a></span></label>
+    <select id="fExec" multiple></select>
+
+    <label>Характер дефекта <span style="float:right"><a href="#" data-all="fChar">все</a> / <a href="#" data-none="fChar">сброс</a></span></label>
+    <select id="fChar" multiple></select>
+
+    <label>Тип <span style="float:right"><a href="#" data-all="fType">все</a> / <a href="#" data-none="fType">сброс</a></span></label>
+    <select id="fType" multiple></select>
+
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="onlyDanger" style="width:auto"> Только аварийноопасные</label>
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="onlyOpen" style="width:auto"> Только неустранённые</label>
+
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" id="btnApply">Применить</button>
+      <button class="btn" id="btnReset">Сбросить</button>
+    </div>
+
+    <details>
+      <summary class="muted" style="margin-top:12px">Соответствие колонок файла (распознано автоматически, можно поменять)</summary>
+      <select id="mDept"></select><label class="muted">— терр. отдел (Терр.отдел)</label>
+      <select id="mExec"></select><label class="muted">— исполнитель</label>
+      <select id="mChar"></select><label class="muted">— характер дефекта</label>
+      <select id="mType"></select><label class="muted">— тип</label>
+      <select id="mUch"></select><label class="muted">— участок</label>
+      <select id="mObj"></select><label class="muted">— объект</label>
+      <select id="mVid"></select><label class="muted">— вид дефекта</label>
+      <select id="mIn"></select><label class="muted">— дата выявления</label>
+      <select id="mOut"></select><label class="muted">— дата устранения (факт)</label>
+      <select id="mPlan"></select><label class="muted">— дата устранения (план)</label>
+    </details>
+    <div class="note">Поступило = дата выявления в периоде. Устранено = дата устранения (факт) в периоде. «В работе» = выявлен в периоде, факт устранения пуст. Диаграмма «По участкам» строится по колонке AH «Участок». Топ-10 объектов и видов дефекта — широкие списки с количеством.</div>
+  </aside>
+
+  <!-- ОСНОВНАЯ ОБЛАСТЬ -->
+  <main>
+    <div class="kpis">
+      <div class="kpi"><div class="t">Поступило за период</div><div class="v blue" id="kIn">—</div></div>
+      <div class="kpi"><div class="t">Устранено за период</div><div class="v green" id="kOut">—</div></div>
+      <div class="kpi"><div class="t">В работе</div><div class="v" id="kOpen">—</div></div>
+      <div class="kpi"><div class="t">Просрочено</div><div class="v red" id="kLate">—</div></div>
+      <div class="kpi"><div class="t">Аварийноопасные</div><div class="v red" id="kDanger">—</div></div>
+      <div class="kpi"><div class="t">% устранения</div><div class="v green" id="kPct">—</div></div>
+    </div>
+
+    <div class="card">
+      <h2 class="cardtitle">Динамика по дням: поступление и устранение дефектов</h2>
+      <div class="chartbox tall"><canvas id="chDays"></canvas></div>
+    </div>
+
+    <div class="grid3">
+      <div class="card"><h2 class="cardtitle">По территориальным отделам</h2><div class="chartbox"><canvas id="chDept"></canvas></div></div>
+      <div class="card"><h2 class="cardtitle">По исполнителям</h2><div class="chartbox"><canvas id="chExec"></canvas></div></div>
+      <div class="card"><h2 class="cardtitle">По характеру дефекта</h2><div class="chartbox"><canvas id="chChar"></canvas></div></div>
+      <div class="card"><h2 class="cardtitle">По участкам</h2><div class="chartbox"><canvas id="chUch"></canvas></div></div>
+
+      <!-- ШИРОКИЕ КАРТОЧКИ СО СПИСКАМИ: во всю строку сетки -->
+      <div class="card wide"><h2 class="cardtitle">Топ-10 объектов</h2><div class="toplist" id="listObj"></div></div>
+      <div class="card wide"><h2 class="cardtitle">Топ-10 видов дефекта</h2><div class="toplist" id="listVid"></div></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2 class="cardtitle">Сводная таблица по территориальным отделам</h2>
+      <div style="max-height:340px;overflow:auto"><table id="tbl"><thead><tr>
+        <th>Терр. отдел</th><th>Поступило</th><th>Устранено</th><th>В работе</th><th>Просрочено</th><th>Аварийноопасные</th><th>% устранения</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ================= СОСТОЯНИЕ ================= */
+let HEADERS=[], ROWS=[], PARSED=[], MAP={dept:0,exec:0,char:0,type:0,uch:0,obj:0,vid:0,dateIn:0,dateOut:0,datePlan:0,danger:-1};
+let CH={};
+const state={from:null,to:null,mode:'any',onlyDanger:false,onlyOpen:false};
+const C_IN='#2563eb', C_OUT='#16a34a';
+const $=id=>document.getElementById(id);
+const fmt=n=>(n||0).toLocaleString('ru-RU');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const dkey=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const dmy=d=>String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+String(d.getFullYear()).slice(2);
+
+/* ================= ПЛАГИН: ПОДПИСИ ЗНАЧЕНИЙ ================= */
+const valueLabels={
+  id:'valueLabels',
+  afterDatasetsDraw(chart){
+    if(chart.data.labels.length>40) return;
+    const ctx=chart.ctx, horiz=chart.options.indexAxis==='y';
+    chart.data.datasets.forEach((ds,di)=>{
+      if(!chart.isDatasetVisible(di)) return;
+      const meta=chart.getDatasetMeta(di);
+      if(meta.type!=='bar') return;
+      ctx.save();
+      ctx.font='bold 10px system-ui,"Segoe UI",sans-serif';
+      ctx.fillStyle='#475569';
+      meta.data.forEach((el,i)=>{
+        const v=ds.data[i];
+        if(v==null||v===0) return;
+        if(horiz){ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(String(v),el.x+4,el.y);}
+        else{ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(String(v),el.x,el.y-2);}
+      });
+      ctx.restore();
+    });
+  }
+};
+Chart.register(valueLabels);
+
+/* ================= ЧТЕНИЕ ФАЙЛА ================= */
+function handleFile(f){ f.arrayBuffer().then(buf=>{ const wb=XLSX.read(buf,{cellDates:true}); const ws=wb.Sheets[wb.SheetNames[0]]; const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:true}); loadAoa(aoa); }); }
+function loadAoa(aoa){
+  let hRow=-1;
+  for(let i=0;i<Math.min(aoa.length,25);i++){ const s=(aoa[i]||[]).map(c=>String(c==null?'':c).toLowerCase()); if(s.some(c=>c.includes('дата выявления'))&&s.some(c=>c.includes('статус'))){hRow=i;break;} }
+  if(hRow<0) for(let i=0;i<Math.min(aoa.length,25);i++){ if((aoa[i]||[]).some(c=>String(c||'').toLowerCase()==='id')){hRow=i;break;} }
+  if(hRow<0){alert('Не найдена строка заголовков');return;}
+  HEADERS=aoa[hRow].map((c,i)=>String(c==null?('Колонка '+(i+1)):c).trim());
+  ROWS=aoa.slice(hRow+1).filter(r=>r&&r.some(c=>c!==null&&String(c).trim()!==''));
+  autoMap(); fillMapSelects(); rebuild(); setPeriodAll(); render();
+}
+function autoMap(){
+  const find=re=>HEADERS.findIndex(h=>re.test(h));
+  const exact=s=>HEADERS.findIndex(h=>h.trim().toLowerCase()===s);
+  MAP.dateIn=find(/дата выявления/i);
+  MAP.dateOut=find(/дата устранения.*факт/i); if(MAP.dateOut<0) MAP.dateOut=find(/устранен.*факт|факт.*устранен/i);
+  MAP.datePlan=find(/дата устранения.*план/i);
+  MAP.danger=find(/аварийноопасн/i);
+  MAP.dept=find(/территориальн|терр\.?\s*отдел|^отдел/i); if(MAP.dept<0)MAP.dept=find(/объект благоустройства/i);
+  MAP.exec=find(/исполнител/i); if(MAP.exec<0)MAP.exec=find(/устранил дефект.*организаци/i); if(MAP.exec<0)MAP.exec=find(/устранил.*организаци/i); if(MAP.exec<0)MAP.exec=find(/устранил дефект.*фио/i); if(MAP.exec<0)MAP.exec=exact('исполнитель');
+  MAP.char=find(/характер/i); if(MAP.char<0)MAP.char=find(/вид дефекта/i);
+  MAP.type=exact('тип'); if(MAP.type<0)MAP.type=find(/^тип\b/i);
+  MAP.uch=exact('участок'); if(MAP.uch<0)MAP.uch=find(/участок ремонта/i); if(MAP.uch<0)MAP.uch=find(/участок/i);
+  MAP.obj=exact('объект'); if(MAP.obj<0)MAP.obj=find(/объект благоустройства/i);
+  MAP.vid=find(/вид дефекта/i);
+}
+function fillMapSelects(){
+  [['mDept','dept'],['mExec','exec'],['mChar','char'],['mType','type'],['mUch','uch'],['mObj','obj'],['mVid','vid'],['mIn','dateIn'],['mOut','dateOut'],['mPlan','datePlan']].forEach(([id,key])=>{
+    const s=$(id); s.innerHTML=HEADERS.map((h,i)=>`<option value="${i}">${h}</option>`).join('');
+    if(MAP[key]>=0) s.value=MAP[key];
+    s.onchange=()=>{MAP[key]=+s.value; rebuild();};
+  });
+}
+/* ================= ПАРСИНГ ================= */
+function parseDate(v){
+  if(v==null||v==='')return null;
+  if(v instanceof Date&&!isNaN(v))return new Date(v.getFullYear(),v.getMonth(),v.getDate());
+  if(typeof v==='number'&&isFinite(v)){const t=Math.round((v-25569)*86400*1000);const d=new Date(t);return isNaN(d)?null:new Date(d.getFullYear(),d.getMonth(),d.getDate());}
+  const s=String(v).trim(); let m;
+  if(m=s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/))return new Date(+m[3],+m[2]-1,+m[1]);
+  if(m=s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2})$/))return new Date(2000+ +m[3],+m[1]-1,+m[2]);
+  if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))return new Date(+m[1],+m[2]-1,+m[3]);
+  const d=new Date(s); return isNaN(d)?null:new Date(d.getFullYear(),d.getMonth(),d.getDate());
+}
+const norm=v=>(v==null||String(v).trim()==='')?'— не указано —':String(v).trim();
+function rebuild(){
+  PARSED=ROWS.map(row=>({row,
+    dateIn:parseDate(row[MAP.dateIn]), dateOut:parseDate(row[MAP.dateOut]), datePlan:parseDate(row[MAP.datePlan]),
+    dept:norm(row[MAP.dept]), exec:norm(row[MAP.exec]), char:norm(row[MAP.char]), type:norm(row[MAP.type]),
+    uch:norm(row[MAP.uch]), obj:norm(row[MAP.obj]), vid:norm(row[MAP.vid]),
+    danger:(()=>{const v=String(row[MAP.danger]??'').toLowerCase(); if(!v||v==='null')return false; if(/нет|false|^0$/.test(v))return false; return /да|true|^1$|\+|yes|аварийн/.test(v);})()
+  }));
+  fillFilterOptions(); render();
+}
+/* ================= ФИЛЬТРЫ ================= */
+function fillFilterOptions(){
+  [['fDept','dept'],['fExec','exec'],['fChar','char'],['fType','type']].forEach(([id,key])=>{
+    const sel=$(id), keep=new Set([...sel.selectedOptions].map(o=>o.value));
+    const cnt={}; PARSED.forEach(r=>cnt[r[key]]=(cnt[r[key]]||0)+1);
+    sel.innerHTML=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).map(v=>`<option value="${v}" ${keep.has(v)?'selected':''}>${v} (${cnt[v]})</option>`).join('');
+  });
+}
+const selSet=id=>new Set([...$(id).selectedOptions].map(o=>o.value));
+function setPeriodAll(){
+  let mn=null,mx=null;
+  PARSED.forEach(r=>{[r.dateIn,r.dateOut].forEach(d=>{if(d){if(!mn||d<mn)mn=d;if(!mx||d>mx)mx=d;}});});
+  const now=new Date(); if(!mn){mn=new Date(now.getFullYear(),0,1);mx=now;}
+  state.from=mn; state.to=mx; syncDateInputs();
+}
+function syncDateInputs(){ $('dFrom').value=dkey(state.from); $('dTo').value=dkey(state.to); }
+function currentScope(){
+  const dS=selSet('fDept'),eS=selSet('fExec'),cS=selSet('fChar'),tS=selSet('fType');
+  return PARSED.filter(r=>{
+    if(state.onlyDanger&&!r.danger)return false;
+    if(state.onlyOpen&&r.dateOut)return false;
+    if(dS.size&&!dS.has(r.dept))return false;
+    if(eS.size&&!eS.has(r.exec))return false;
+    if(cS.size&&!cS.has(r.char))return false;
+    if(tS.size&&!tS.has(r.type))return false;
+    r._inP=!!(r.dateIn&&r.dateIn>=state.from&&r.dateIn<=state.to);
+    r._outP=!!(r.dateOut&&r.dateOut>=state.from&&r.dateOut<=state.to);
+    if(state.mode==='in')return r._inP;
+    if(state.mode==='out')return r._outP;
+    return r._inP||r._outP;
+  });
+}
+/* ================= РЕНДЕР ================= */
+function render(){
+  if(!PARSED.length)return;
+  const scope=currentScope(), today=new Date(); today.setHours(0,0,0,0);
+  const kIn=scope.filter(r=>r._inP).length, kOut=scope.filter(r=>r._outP).length;
+  const open=scope.filter(r=>r._inP&&!r.dateOut);
+  const late=open.filter(r=>r.datePlan&&r.datePlan<today).length;
+  $('kIn').textContent=fmt(kIn); $('kOut').textContent=fmt(kOut); $('kOpen').textContent=fmt(open.length);
+  $('kLate').textContent=fmt(late); $('kDanger').textContent=fmt(scope.filter(r=>r.danger).length);
+  $('kPct').textContent=(kIn?Math.round(kOut/kIn*1000)/10:0).toLocaleString('ru-RU')+'%';
+  $('recInfo').textContent=`В файле: ${fmt(PARSED.length)} записей · в выборке: ${fmt(scope.length)} · период ${dmy(state.from)}–${dmy(state.to)}`;
+  renderDays(scope);
+  renderGroup(scope,'dept','chDept',20);
+  renderGroup(scope,'exec','chExec',12);
+  renderGroup(scope,'char','chChar',20);
+  renderGroup(scope,'uch','chUch',15);
+  renderTopList(scope,'obj','listObj',10);
+  renderTopList(scope,'vid','listVid',10);
+  renderTable(scope,today);
+}
+function buckets(){
+  const days=Math.round((state.to-state.from)/86400000)+1;
+  if(days<=62)return{step:'d',n:days}; if(days<=400)return{step:'w',n:Math.ceil(days/7)}; return{step:'m',n:Math.ceil(days/30)};
+}
+function bucketKey(d,step){ if(step==='d')return dkey(d);
+  if(step==='w'){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);return dkey(x);}
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function renderDays(scope){
+  const {step}=buckets(); const labels=[],keys=[]; const cur=new Date(state.from);
+  if(step==='m'){while(cur<=state.to){keys.push(bucketKey(cur,'m'));labels.push(String(cur.getMonth()+1).padStart(2,'0')+'.'+cur.getFullYear());cur.setMonth(cur.getMonth()+1);}}
+  else{const seen=new Set();while(cur<=state.to){const k=bucketKey(cur,step);if(!seen.has(k)){seen.add(k);keys.push(k);labels.push(dmy(cur).slice(0,5));}cur.setDate(cur.getDate()+1);}}
+  const inA=Array(keys.length).fill(0), outA=Array(keys.length).fill(0), idx={}; keys.forEach((k,i)=>idx[k]=i);
+  scope.forEach(r=>{ if(r._inP){const k=bucketKey(r.dateIn,step); if(k in idx)inA[idx[k]]++;} if(r._outP){const k=bucketKey(r.dateOut,step); if(k in idx)outA[idx[k]]++;} });
+  mk('chDays',{type:'bar',data:{labels,datasets:[
+    {type:'bar',label:'Поступило',data:inA,backgroundColor:C_IN,order:2},
+    {type:'line',label:'Устранено',data:outA,borderColor:C_OUT,backgroundColor:C_OUT,tension:.3,pointRadius:2,order:1}]},
+    opt:{scales:{x:{ticks:{maxTicksLimit:20}},y:{beginAtZero:true,ticks:{precision:0}}},layout:{padding:{top:16}}}});
+}
+function renderGroup(scope,key,canvas,max){
+  const agg={}; scope.forEach(r=>{const v=r[key];const e=agg[v]||(agg[v]={i:0,o:0});if(r._inP)e.i++;if(r._outP)e.o++;});
+  const arr=Object.entries(agg).map(([v,e])=>({v,...e})).sort((a,b)=>(b.i+b.o)-(a.i+a.o)).slice(0,max);
+  mk(canvas,{type:'bar',data:{labels:arr.map(a=>a.v),datasets:[
+    {label:'Поступило',data:arr.map(a=>a.i),backgroundColor:C_IN},
+    {label:'Устранено',data:arr.map(a=>a.o),backgroundColor:C_OUT}]},
+    opt:{indexAxis:'y',scales:{x:{beginAtZero:true,ticks:{precision:0}}},layout:{padding:{right:34}}}});
+}
+/* ===== ТОП-СПИСКИ (объекты, виды дефекта) — широкие карточки ===== */
+function renderTopList(scope,key,elId,max){
+  const agg={};
+  scope.forEach(r=>{const v=r[key];const e=agg[v]||(agg[v]={t:0,i:0,o:0});e.t++;if(r._inP)e.i++;if(r._outP)e.o++;});
+  const arr=Object.entries(agg).map(([v,e])=>({v,...e})).sort((a,b)=>b.t-a.t||b.i-a.i).slice(0,max);
+  const mx=arr.length?arr[0].t:1;
+  $(elId).innerHTML=arr.map((a,i)=>`<div class="tl-row" title="${esc(a.v)}">
+      <span class="tl-rank">${i+1}</span>
+      <div class="tl-main">
+        <div class="tl-name">${esc(a.v)}</div>
+        <div class="tl-bar"><i style="width:${Math.round(a.t/mx*100)}%"></i></div>
+        <div class="tl-sub">поступило ${fmt(a.i)} · устранено ${fmt(a.o)}</div>
+      </div>
+      <span class="tl-val">${fmt(a.t)}</span>
+    </div>`).join('')||'<div class="muted">Нет данных в выборке</div>';
+}
+function renderTable(scope,today){
+  const agg={}; scope.forEach(r=>{const e=agg[r.dept]||(agg[r.dept]={i:0,o:0,op:0,lt:0,dg:0});
+    if(r._inP)e.i++; if(r._outP)e.o++; if(r._inP&&!r.dateOut){e.op++; if(r.datePlan&&r.datePlan<today)e.lt++;} if(r.danger)e.dg++;});
+  const tb=$('tbl').tBodies[0];
+  tb.innerHTML=Object.entries(agg).sort((a,b)=>b[1].i-a[1].i).map(([v,e])=>
+    `<tr><td>${v}</td><td>${fmt(e.i)}</td><td>${fmt(e.o)}</td><td>${fmt(e.op)}</td><td>${fmt(e.lt)}</td><td>${fmt(e.dg)}</td><td>${e.i?Math.round(e.o/e.i*1000)/10:0}%</td></tr>`).join('')
+    ||'<tr><td colspan="7" class="muted">Нет данных в выборке</td></tr>';
+}
+function mk(id,cfg){ if(CH[id])CH[id].destroy();
+  CH[id]=new Chart($(id),{type:cfg.type,data:cfg.data,options:Object.assign({responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{position:'top'}},interaction:{mode:'index',intersect:false}},cfg.opt||{})}); }
+/* ================= СОБЫТИЯ ================= */
+$('drop').onclick=()=>$('file').click();
+$('file').onchange=e=>{if(e.target.files[0])handleFile(e.target.files[0]);};
+['dragover','dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();
+  if(ev==='dragover')$('drop').classList.add('hover'); if(ev==='dragleave')$('drop').classList.remove('hover');
+  if(ev==='drop'){$('drop').classList.remove('hover');handleFile(e.dataTransfer.files[0]);}}));
+$('presets').onclick=e=>{const c=e.target.closest('.chip');if(!c)return;
+  [...$('presets').children].forEach(x=>x.classList.remove('on'));c.classList.add('on');
+  const now=new Date();now.setHours(0,0,0,0);const p=c.dataset.p;
+  if(p==='all'){setPeriodAll();render();return;}
+  if(p==='7'){state.from=new Date(now-6*86400000);state.to=now;}
+  else if(p==='30'){state.from=new Date(now-29*86400000);state.to=now;}
+  else if(p==='m'){state.from=new Date(now.getFullYear(),now.getMonth(),1);state.to=new Date(now.getFullYear(),now.getMonth()+1,0);}
+  else if(p==='q'){const q=Math.floor(now.getMonth()/3)*3;state.from=new Date(now.getFullYear(),q,1);state.to=new Date(now.getFullYear(),q+3,0);}
+  else if(p==='y'){state.from=new Date(now.getFullYear(),0,1);state.to=new Date(now.getFullYear(),11,31);}
+  syncDateInputs();render();};
+$('dFrom').onchange=e=>{state.from=parseDate(e.target.value)||state.from;render();};
+$('dTo').onchange=e=>{state.to=parseDate(e.target.value)||state.to;render();};
+$('mode').onchange=e=>{state.mode=e.target.value;render();};
+['fDept','fExec','fChar','fType'].forEach(id=>$(id).onchange=render);
+$('onlyDanger').onchange=e=>{state.onlyDanger=e.target.checked;render();};
+$('onlyOpen').onchange=e=>{state.onlyOpen=e.target.checked;render();};
+$('btnApply').onclick=render;
+$('btnReset').onclick=()=>{['fDept','fExec','fChar','fType'].forEach(id=>[...$(id).options].forEach(o=>o.selected=false));
+  $('onlyDanger').checked=$('onlyOpen').checked=false;state.onlyDanger=state.onlyOpen=false;
+  $('mode').value='any';state.mode='any';setPeriodAll();render();};
+document.querySelectorAll('[data-all],[data-none]').forEach(a=>a.onclick=e=>{e.preventDefault();
+  [...$(a.dataset.all||a.dataset.none).options].forEach(o=>o.selected=!!a.dataset.all);render();});
+$('btnPrint').onclick=()=>window.print();
+$('btnCsv').onclick=()=>{const scope=currentScope();
+  const rows=[HEADERS].concat(scope.map(r=>r.row));
+  const csv='\uFEFF'+rows.map(r=>r.map(c=>{const s=c==null?'':String(c);return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(';')).join('\r\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='vyborka_defekty.csv';a.click();};
+/* ================= ДЕМО-ДАННЫЕ ================= */
+$('btnDemo').onclick=()=>{
+  const dept=['Красногорск','Нахабино','Отрадненское','Ильинское','Павшинская пойма'];
+  const exec=['МБУ "КГС"','ООО УК "Феникс"','ООО "УК НКС"','ООО «ОБРАЗЦОВО ЮГ»','РСО','Иные УК'];
+  const chr=['Иное','Гарантийный','Текущий','Аварийноопасный'];
+  const typ=['Дефект полотна','Дефект ДИП','Дефект обустройства','Уборка'];
+  const uch=['Южный / Вокзальная','Институтская / Панфилова','Турецкий городок','ЖК Мортон','Пойма','Ильинское-Усово','ЖК Красногорский','Ч-2'];
+  const obj=['Архангельское поселок д. 31, 32, 33, 34, 35, 36, 37, 38, 39, 40 (ТО Ильинское)','Новый поселок д. 4, 6, 7, 8 к. 1, 2, 3, д. 9, 10, 11 (ТО Ильинское)','го Красногорск, с.Петрово-Дальнее, пос. Ленинский, д.20 , д. 21, д. 22, д. 23','го Красногорск, с.Петрово-Дальнее, пос.Ленинский, д.28, д.29, д.30','Архангельское поселок д. 1, 26, 27, 28, 29, 30 (ТО Ильинское)','Панфилова улица д. 12, 14, 22, 24 (пгт. Нахабино)','Панфилова улица д. 15, 17, 19 (пгт. Нахабино)','Школьная улица д. 8 (пгт. Нахабино)','Институтская улица д. 10, 10А','Заводская улица д. 18 к. 1, 2, 3'];
+  const vid=['Деформации и разрушения','Выбоины','Граффити','Дефект ДИП','Уборка','Переполненные урны','Выступающие гвозди, болты, арматура','Игровой элемент ДИП требует покраски'];
+  const rnd=n=>Math.floor(Math.random()*n);
+  HEADERS=['ID','Дата выявления дефекта','Статус','Терр.отдел','Исполнитель','Характер дефекта','Тип','Участок','Объект','Вид дефекта','Дата устранения дефекта (план)','Дата устранения дефекта (факт)','Признак Аварийноопасный'];
+  const rows=[]; const now=new Date();
+  for(let i=1;i<=400;i++){const di=new Date(now- rnd(180)*86400000); const done=Math.random()<.72;
+    const do_=done?new Date(Math.min(now,+di+rnd(25)*86400000)):null; const ch=chr[rnd(4)];
+    rows.push([i,dmy(di),done?'Устранен':'Принят',dept[rnd(5)],exec[rnd(6)],ch,typ[rnd(4)],uch[rnd(8)],obj[rnd(obj.length)],vid[rnd(vid.length)],dmy(new Date(+di+15*86400000)),do_?dmy(do_):'',ch==='Аварийноопасный'?'Да':'Нет']);}
+  ROWS=rows; autoMap(); fillMapSelects(); rebuild(); setPeriodAll(); render();};
+</script>
+</body>
+</html>
