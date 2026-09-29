@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Дашборд дефектов дорожных объектов</title>
+<title>Дашборд дефектов СКПДИ</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
@@ -14,7 +14,7 @@
   .layout{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:16px 20px}
   @media(max-width:1000px){.layout{grid-template-columns:1fr}}
   .card{background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
-  .card.wide{grid-column:1/-1}                 /* карточка на всю ширину основной области */
+  .card.wide{grid-column:1/-1}
   .panel h3{margin:0 0 10px;font-size:15px}
   .panel label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
   .panel select,.panel input[type=date]{width:100%;padding:6px 8px;border:1px solid var(--brd);border-radius:8px;background:#fff;font-size:13px}
@@ -50,7 +50,7 @@
   .tl-rank{width:24px;height:24px;border-radius:7px;background:#eef2ff;color:var(--blue);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
   .tl-row:nth-child(-n+3) .tl-rank{background:var(--blue);color:#fff}
   .tl-main{flex:1;min-width:0}
-  .tl-name{font-size:13px;white-space:normal;overflow-wrap:break-word}   /* перенос по словам, без многоточия */
+  .tl-name{font-size:13px;white-space:normal;overflow-wrap:break-word}
   .tl-bar{height:6px;background:#e2e8f0;border-radius:4px;margin:4px 0;overflow:hidden}
   .tl-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--green));border-radius:4px}
   .tl-sub{font-size:11px;color:var(--mut)}
@@ -112,6 +112,9 @@
     <label>Тип <span style="float:right"><a href="#" data-all="fType">все</a> / <a href="#" data-none="fType">сброс</a></span></label>
     <select id="fType" multiple></select>
 
+    <label>Тип объекта <span style="float:right"><a href="#" data-all="fObjType">все</a> / <a href="#" data-none="fObjType">сброс</a></span></label>
+    <select id="fObjType" multiple></select>
+
     <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="onlyDanger" style="width:auto"> Только аварийноопасные</label>
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="onlyOpen" style="width:auto"> Только неустранённые</label>
 
@@ -122,10 +125,12 @@
 
     <details>
       <summary class="muted" style="margin-top:12px">Соответствие колонок файла (распознано автоматически, можно поменять)</summary>
+      <select id="mStatus"></select><label class="muted">— статус (записи «Отклонен» исключаются из всех расчётов)</label>
       <select id="mDept"></select><label class="muted">— терр. отдел (Терр.отдел)</label>
       <select id="mExec"></select><label class="muted">— исполнитель</label>
       <select id="mChar"></select><label class="muted">— характер дефекта</label>
       <select id="mType"></select><label class="muted">— тип</label>
+      <select id="mObjType"></select><label class="muted">— тип объекта</label>
       <select id="mUch"></select><label class="muted">— участок</label>
       <select id="mObj"></select><label class="muted">— объект</label>
       <select id="mVid"></select><label class="muted">— вид дефекта</label>
@@ -133,7 +138,7 @@
       <select id="mOut"></select><label class="muted">— дата устранения (факт)</label>
       <select id="mPlan"></select><label class="muted">— дата устранения (план)</label>
     </details>
-    <div class="note">Поступило = дата выявления в периоде. Устранено = дата устранения (факт) в периоде. «В работе» = выявлен в периоде, факт устранения пуст. Диаграмма «По участкам» строится по колонке AH «Участок». Топ-10 объектов и видов дефекта — широкие списки с количеством.</div>
+    <div class="note">Дефекты со статусом «Отклонен» не учитываются ни в каких расчётах. Поступило = дата выявления в периоде. Устранено = дата устранения (факт) в периоде. «В работе» = выявлен в периоде, факт устранения пуст. Диаграмма «По участкам» — по колонке AH «Участок». Топ-10 объектов и видов дефекта — широкие списки с количеством.</div>
   </aside>
 
   <!-- ОСНОВНАЯ ОБЛАСТЬ -->
@@ -174,7 +179,8 @@
 
 <script>
 /* ================= СОСТОЯНИЕ ================= */
-let HEADERS=[], ROWS=[], PARSED=[], MAP={dept:0,exec:0,char:0,type:0,uch:0,obj:0,vid:0,dateIn:0,dateOut:0,datePlan:0,danger:-1};
+let HEADERS=[], ROWS=[], PARSED=[], REJECTED=0;
+let MAP={status:0,dept:0,exec:0,char:0,type:0,objtype:0,uch:0,obj:0,vid:0,dateIn:0,dateOut:0,datePlan:0,danger:-1};
 let CH={};
 const state={from:null,to:null,mode:'any',onlyDanger:false,onlyOpen:false};
 const C_IN='#2563eb', C_OUT='#16a34a';
@@ -223,6 +229,7 @@ function loadAoa(aoa){
 function autoMap(){
   const find=re=>HEADERS.findIndex(h=>re.test(h));
   const exact=s=>HEADERS.findIndex(h=>h.trim().toLowerCase()===s);
+  MAP.status=exact('статус'); if(MAP.status<0)MAP.status=find(/^статус\b/i);
   MAP.dateIn=find(/дата выявления/i);
   MAP.dateOut=find(/дата устранения.*факт/i); if(MAP.dateOut<0) MAP.dateOut=find(/устранен.*факт|факт.*устранен/i);
   MAP.datePlan=find(/дата устранения.*план/i);
@@ -231,12 +238,13 @@ function autoMap(){
   MAP.exec=find(/исполнител/i); if(MAP.exec<0)MAP.exec=find(/устранил дефект.*организаци/i); if(MAP.exec<0)MAP.exec=find(/устранил.*организаци/i); if(MAP.exec<0)MAP.exec=find(/устранил дефект.*фио/i); if(MAP.exec<0)MAP.exec=exact('исполнитель');
   MAP.char=find(/характер/i); if(MAP.char<0)MAP.char=find(/вид дефекта/i);
   MAP.type=exact('тип'); if(MAP.type<0)MAP.type=find(/^тип\b/i);
+  MAP.objtype=exact('тип объекта'); if(MAP.objtype<0)MAP.objtype=find(/тип объекта/i);
   MAP.uch=exact('участок'); if(MAP.uch<0)MAP.uch=find(/участок ремонта/i); if(MAP.uch<0)MAP.uch=find(/участок/i);
   MAP.obj=exact('объект'); if(MAP.obj<0)MAP.obj=find(/объект благоустройства/i);
   MAP.vid=find(/вид дефекта/i);
 }
 function fillMapSelects(){
-  [['mDept','dept'],['mExec','exec'],['mChar','char'],['mType','type'],['mUch','uch'],['mObj','obj'],['mVid','vid'],['mIn','dateIn'],['mOut','dateOut'],['mPlan','datePlan']].forEach(([id,key])=>{
+  [['mStatus','status'],['mDept','dept'],['mExec','exec'],['mChar','char'],['mType','type'],['mObjType','objtype'],['mUch','uch'],['mObj','obj'],['mVid','vid'],['mIn','dateIn'],['mOut','dateOut'],['mPlan','datePlan']].forEach(([id,key])=>{
     const s=$(id); s.innerHTML=HEADERS.map((h,i)=>`<option value="${i}">${h}</option>`).join('');
     if(MAP[key]>=0) s.value=MAP[key];
     s.onchange=()=>{MAP[key]=+s.value; rebuild();};
@@ -254,10 +262,14 @@ function parseDate(v){
   const d=new Date(s); return isNaN(d)?null:new Date(d.getFullYear(),d.getMonth(),d.getDate());
 }
 const norm=v=>(v==null||String(v).trim()==='')?'— не указано —':String(v).trim();
+/* записи со статусом «Отклонен»/«Отклонён» исключаются из ВСЕХ расчётов */
+const isRejected=row=>String(row[MAP.status]??'').trim().toLowerCase().replace(/ё/g,'е')==='отклонен';
 function rebuild(){
-  PARSED=ROWS.map(row=>({row,
+  REJECTED=ROWS.filter(isRejected).length;
+  PARSED=ROWS.filter(r=>!isRejected(r)).map(row=>({row,
     dateIn:parseDate(row[MAP.dateIn]), dateOut:parseDate(row[MAP.dateOut]), datePlan:parseDate(row[MAP.datePlan]),
     dept:norm(row[MAP.dept]), exec:norm(row[MAP.exec]), char:norm(row[MAP.char]), type:norm(row[MAP.type]),
+    objtype:norm(row[MAP.objtype]),
     uch:norm(row[MAP.uch]), obj:norm(row[MAP.obj]), vid:norm(row[MAP.vid]),
     danger:(()=>{const v=String(row[MAP.danger]??'').toLowerCase(); if(!v||v==='null')return false; if(/нет|false|^0$/.test(v))return false; return /да|true|^1$|\+|yes|аварийн/.test(v);})()
   }));
@@ -265,7 +277,7 @@ function rebuild(){
 }
 /* ================= ФИЛЬТРЫ ================= */
 function fillFilterOptions(){
-  [['fDept','dept'],['fExec','exec'],['fChar','char'],['fType','type']].forEach(([id,key])=>{
+  [['fDept','dept'],['fExec','exec'],['fChar','char'],['fType','type'],['fObjType','objtype']].forEach(([id,key])=>{
     const sel=$(id), keep=new Set([...sel.selectedOptions].map(o=>o.value));
     const cnt={}; PARSED.forEach(r=>cnt[r[key]]=(cnt[r[key]]||0)+1);
     sel.innerHTML=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).map(v=>`<option value="${v}" ${keep.has(v)?'selected':''}>${v} (${cnt[v]})</option>`).join('');
@@ -280,7 +292,7 @@ function setPeriodAll(){
 }
 function syncDateInputs(){ $('dFrom').value=dkey(state.from); $('dTo').value=dkey(state.to); }
 function currentScope(){
-  const dS=selSet('fDept'),eS=selSet('fExec'),cS=selSet('fChar'),tS=selSet('fType');
+  const dS=selSet('fDept'),eS=selSet('fExec'),cS=selSet('fChar'),tS=selSet('fType'),otS=selSet('fObjType');
   return PARSED.filter(r=>{
     if(state.onlyDanger&&!r.danger)return false;
     if(state.onlyOpen&&r.dateOut)return false;
@@ -288,6 +300,7 @@ function currentScope(){
     if(eS.size&&!eS.has(r.exec))return false;
     if(cS.size&&!cS.has(r.char))return false;
     if(tS.size&&!tS.has(r.type))return false;
+    if(otS.size&&!otS.has(r.objtype))return false;
     r._inP=!!(r.dateIn&&r.dateIn>=state.from&&r.dateIn<=state.to);
     r._outP=!!(r.dateOut&&r.dateOut>=state.from&&r.dateOut<=state.to);
     if(state.mode==='in')return r._inP;
@@ -297,7 +310,7 @@ function currentScope(){
 }
 /* ================= РЕНДЕР ================= */
 function render(){
-  if(!PARSED.length)return;
+  if(!PARSED.length&&!REJECTED)return;
   const scope=currentScope(), today=new Date(); today.setHours(0,0,0,0);
   const kIn=scope.filter(r=>r._inP).length, kOut=scope.filter(r=>r._outP).length;
   const open=scope.filter(r=>r._inP&&!r.dateOut);
@@ -305,7 +318,7 @@ function render(){
   $('kIn').textContent=fmt(kIn); $('kOut').textContent=fmt(kOut); $('kOpen').textContent=fmt(open.length);
   $('kLate').textContent=fmt(late); $('kDanger').textContent=fmt(scope.filter(r=>r.danger).length);
   $('kPct').textContent=(kIn?Math.round(kOut/kIn*1000)/10:0).toLocaleString('ru-RU')+'%';
-  $('recInfo').textContent=`В файле: ${fmt(PARSED.length)} записей · в выборке: ${fmt(scope.length)} · период ${dmy(state.from)}–${dmy(state.to)}`;
+  $('recInfo').textContent=`В файле: ${fmt(ROWS.length)} · исключено «Отклонен»: ${fmt(REJECTED)} · в выборке: ${fmt(scope.length)} · период ${dmy(state.from)}–${dmy(state.to)}`;
   renderDays(scope);
   renderGroup(scope,'dept','chDept',20);
   renderGroup(scope,'exec','chExec',12);
@@ -387,11 +400,11 @@ $('presets').onclick=e=>{const c=e.target.closest('.chip');if(!c)return;
 $('dFrom').onchange=e=>{state.from=parseDate(e.target.value)||state.from;render();};
 $('dTo').onchange=e=>{state.to=parseDate(e.target.value)||state.to;render();};
 $('mode').onchange=e=>{state.mode=e.target.value;render();};
-['fDept','fExec','fChar','fType'].forEach(id=>$(id).onchange=render);
+['fDept','fExec','fChar','fType','fObjType'].forEach(id=>$(id).onchange=render);
 $('onlyDanger').onchange=e=>{state.onlyDanger=e.target.checked;render();};
 $('onlyOpen').onchange=e=>{state.onlyOpen=e.target.checked;render();};
 $('btnApply').onclick=render;
-$('btnReset').onclick=()=>{['fDept','fExec','fChar','fType'].forEach(id=>[...$(id).options].forEach(o=>o.selected=false));
+$('btnReset').onclick=()=>{['fDept','fExec','fChar','fType','fObjType'].forEach(id=>[...$(id).options].forEach(o=>o.selected=false));
   $('onlyDanger').checked=$('onlyOpen').checked=false;state.onlyDanger=state.onlyOpen=false;
   $('mode').value='any';state.mode='any';setPeriodAll();render();};
 document.querySelectorAll('[data-all],[data-none]').forEach(a=>a.onclick=e=>{e.preventDefault();
@@ -406,16 +419,17 @@ $('btnDemo').onclick=()=>{
   const dept=['Красногорск','Нахабино','Отрадненское','Ильинское','Павшинская пойма'];
   const exec=['МБУ "КГС"','ООО УК "Феникс"','ООО "УК НКС"','ООО «ОБРАЗЦОВО ЮГ»','РСО','Иные УК'];
   const chr=['Иное','Гарантийный','Текущий','Аварийноопасный'];
-  const typ=['Дефект полотна','Дефект ДИП','Дефект обустройства','Уборка'];
+  const typ=['Дефект полотна','Дефекты ОГХ','Дефект ДИП','Уборка'];
+  const objtyp=['Участок автомобильной дороги','Дворовая территория','Объект благоустройства'];
   const uch=['Южный / Вокзальная','Институтская / Панфилова','Турецкий городок','ЖК Мортон','Пойма','Ильинское-Усово','ЖК Красногорский','Ч-2'];
   const obj=['Архангельское поселок д. 31, 32, 33, 34, 35, 36, 37, 38, 39, 40 (ТО Ильинское)','Новый поселок д. 4, 6, 7, 8 к. 1, 2, 3, д. 9, 10, 11 (ТО Ильинское)','го Красногорск, с.Петрово-Дальнее, пос. Ленинский, д.20 , д. 21, д. 22, д. 23','го Красногорск, с.Петрово-Дальнее, пос.Ленинский, д.28, д.29, д.30','Архангельское поселок д. 1, 26, 27, 28, 29, 30 (ТО Ильинское)','Панфилова улица д. 12, 14, 22, 24 (пгт. Нахабино)','Панфилова улица д. 15, 17, 19 (пгт. Нахабино)','Школьная улица д. 8 (пгт. Нахабино)','Институтская улица д. 10, 10А','Заводская улица д. 18 к. 1, 2, 3'];
   const vid=['Деформации и разрушения','Выбоины','Граффити','Дефект ДИП','Уборка','Переполненные урны','Выступающие гвозди, болты, арматура','Игровой элемент ДИП требует покраски'];
   const rnd=n=>Math.floor(Math.random()*n);
-  HEADERS=['ID','Дата выявления дефекта','Статус','Терр.отдел','Исполнитель','Характер дефекта','Тип','Участок','Объект','Вид дефекта','Дата устранения дефекта (план)','Дата устранения дефекта (факт)','Признак Аварийноопасный'];
+  HEADERS=['ID','Дата выявления дефекта','Статус','Выявлен в процессе проверки','Тип объекта','Объект','Тип','Вид дефекта','Терр.отдел','Исполнитель','Характер дефекта','Участок','Дата устранения дефекта (план)','Дата устранения дефекта (факт)','Признак Аварийноопасный'];
   const rows=[]; const now=new Date();
-  for(let i=1;i<=400;i++){const di=new Date(now- rnd(180)*86400000); const done=Math.random()<.72;
-    const do_=done?new Date(Math.min(now,+di+rnd(25)*86400000)):null; const ch=chr[rnd(4)];
-    rows.push([i,dmy(di),done?'Устранен':'Принят',dept[rnd(5)],exec[rnd(6)],ch,typ[rnd(4)],uch[rnd(8)],obj[rnd(obj.length)],vid[rnd(vid.length)],dmy(new Date(+di+15*86400000)),do_?dmy(do_):'',ch==='Аварийноопасный'?'Да':'Нет']);}
+  for(let i=1;i<=400;i++){const di=new Date(now- rnd(180)*86400000); const rej=Math.random()<.25; const done=Math.random()<.72;
+    const do_=(!rej&&done)?new Date(Math.min(now,+di+rnd(25)*86400000)):null; const ch=chr[rnd(4)]; const ot=objtyp[rnd(3)];
+    rows.push([i,dmy(di),rej?'Отклонен':(done?'Устранен':'Принят'),'',ot,obj[rnd(obj.length)],typ[rnd(4)],vid[rnd(vid.length)],dept[rnd(5)],exec[rnd(6)],ch,uch[rnd(8)],dmy(new Date(+di+15*86400000)),do_?dmy(do_):'',ch==='Аварийноопасный'?'Да':'Нет']);}
   ROWS=rows; autoMap(); fillMapSelects(); rebuild(); setPeriodAll(); render();};
 </script>
 </body>
