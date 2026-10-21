@@ -6,6 +6,7 @@
 <title>Дашборд дефектов СКПДИ</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
   :root{--blue:#2563eb;--green:#16a34a;--red:#dc2626;--amber:#d97706;--bg:#f1f5f9;--card:#fff;--txt:#0f172a;--mut:#64748b;--brd:#e2e8f0}
   *{box-sizing:border-box} body{margin:0;font:14px/1.45 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--txt)}
@@ -22,7 +23,8 @@
   .row{display:flex;gap:8px}.row>*{flex:1}
   .btn{border:1px solid var(--brd);background:#fff;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px}
   .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-  .btn:hover{filter:brightness(.96)}
+  .btn:disabled{opacity:.6;cursor:wait}
+  .btn:hover:not(:disabled){filter:brightness(.96)}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
   .chip{border:1px solid var(--brd);background:#eef2ff;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
   .chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
@@ -34,6 +36,7 @@
   .chartbox{position:relative;height:320px}
   .chartbox.tall{height:380px}
   h2.cardtitle{font-size:15px;margin:0 0 10px}
+  .tblwrap{max-height:340px;overflow:auto}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{padding:7px 10px;border-bottom:1px solid var(--brd);text-align:right} th:first-child,td:first-child{text-align:left}
   thead th{background:#f8fafc;position:sticky;top:0}
@@ -44,7 +47,6 @@
   .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
   .pill{background:#eef2ff;border-radius:8px;padding:6px 10px;font-size:12px}
   details summary{cursor:pointer}
-  /* ===== ТОП-СПИСКИ (широкие, без обрезки наименований) ===== */
   .toplist{display:flex;flex-direction:column;gap:9px;max-height:420px;overflow:auto;padding-right:4px}
   .tl-row{display:flex;gap:10px;align-items:center}
   .tl-rank{width:24px;height:24px;border-radius:7px;background:#eef2ff;color:var(--blue);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
@@ -62,6 +64,7 @@
     .card{box-shadow:none;break-inside:avoid;border:none}
     .chartbox{height:260px}
     .toplist{max-height:none;overflow:visible}
+    .tblwrap{max-height:none;overflow:visible}
     *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     @page{margin:10mm}
   }
@@ -73,13 +76,13 @@
   <div class="toolbar">
     <span class="pill" id="recInfo">Файл не загружен</span>
     <button class="btn" id="btnPrint">🖨 Печать</button>
+    <button class="btn" id="btnPdf">📄 Экспорт в PDF</button>
     <button class="btn" id="btnDemo">Демо-данные</button>
     <button class="btn" id="btnCsv">Экспорт выборки (CSV)</button>
   </div>
 </header>
 
 <div class="layout">
-  <!-- ПАНЕЛЬ ФИЛЬТРОВ -->
   <aside class="card panel">
     <h3>Фильтры</h3>
     <div class="drop" id="drop">📂 Выберите файл .xlsx / .xls<br><span class="muted">или перетащите его сюда</span>
@@ -138,10 +141,9 @@
       <select id="mOut"></select><label class="muted">— дата устранения (факт)</label>
       <select id="mPlan"></select><label class="muted">— дата устранения (план)</label>
     </details>
-    <div class="note">Дефекты со статусом «Отклонен» не учитываются ни в каких расчётах. Поступило = дата выявления в периоде. Устранено = дата устранения (факт) в периоде. «В работе» = выявлен в периоде, факт устранения пуст. Диаграмма «По участкам» — по колонке AH «Участок». Топ-10 объектов и видов дефекта — широкие списки с количеством.</div>
+    <div class="note">Дефекты со статусом «Отклонен» не учитываются ни в каких расчётах. Поступило = дата выявления в периоде. Устранено = дата устранения (факт) в периоде. «В работе» = выявлен в периоде, факт устранения пуст. Диаграмма «По участкам» — по колонке AH «Участок». Топ-10 объектов и видов дефекта — широкие списки с количеством. PDF экспортируется свёрстанным отчётом (A4 альбомная, кириллический шрифт встроен).</div>
   </aside>
 
-  <!-- ОСНОВНАЯ ОБЛАСТЬ -->
   <main>
     <div class="kpis">
       <div class="kpi"><div class="t">Поступило за период</div><div class="v blue" id="kIn">—</div></div>
@@ -162,15 +164,13 @@
       <div class="card"><h2 class="cardtitle">По исполнителям</h2><div class="chartbox"><canvas id="chExec"></canvas></div></div>
       <div class="card"><h2 class="cardtitle">По характеру дефекта</h2><div class="chartbox"><canvas id="chChar"></canvas></div></div>
       <div class="card"><h2 class="cardtitle">По участкам</h2><div class="chartbox"><canvas id="chUch"></canvas></div></div>
-
-      <!-- ШИРОКИЕ КАРТОЧКИ СО СПИСКАМИ: во всю строку сетки -->
       <div class="card wide"><h2 class="cardtitle">Топ-10 объектов</h2><div class="toplist" id="listObj"></div></div>
       <div class="card wide"><h2 class="cardtitle">Топ-10 видов дефекта</h2><div class="toplist" id="listVid"></div></div>
     </div>
 
     <div class="card" style="margin-top:16px">
       <h2 class="cardtitle">Сводная таблица по территориальным отделам</h2>
-      <div style="max-height:340px;overflow:auto"><table id="tbl"><thead><tr>
+      <div class="tblwrap"><table id="tbl"><thead><tr>
         <th>Терр. отдел</th><th>Поступило</th><th>Устранено</th><th>В работе</th><th>Просрочено</th><th>Аварийноопасные</th><th>% устранения</th>
       </tr></thead><tbody></tbody></table></div>
     </div>
@@ -262,7 +262,6 @@ function parseDate(v){
   const d=new Date(s); return isNaN(d)?null:new Date(d.getFullYear(),d.getMonth(),d.getDate());
 }
 const norm=v=>(v==null||String(v).trim()==='')?'— не указано —':String(v).trim();
-/* записи со статусом «Отклонен»/«Отклонён» исключаются из ВСЕХ расчётов */
 const isRejected=row=>String(row[MAP.status]??'').trim().toLowerCase().replace(/ё/g,'е')==='отклонен';
 function rebuild(){
   REJECTED=ROWS.filter(isRejected).length;
@@ -308,7 +307,47 @@ function currentScope(){
     return r._inP||r._outP;
   });
 }
-/* ================= РЕНДЕР ================= */
+/* ================= АГРЕГАЦИИ ================= */
+function aggBy(scope,key,max){
+  const agg={}; scope.forEach(r=>{const v=r[key];const e=agg[v]||(agg[v]={i:0,o:0});if(r._inP)e.i++;if(r._outP)e.o++;});
+  return Object.entries(agg).map(([v,e])=>({v,...e})).sort((a,b)=>(b.i+b.o)-(a.i+a.o)).slice(0,max);
+}
+function aggTop(scope,key,max){
+  const agg={}; scope.forEach(r=>{const v=r[key];const e=agg[v]||(agg[v]={t:0,i:0,o:0});e.t++;if(r._inP)e.i++;if(r._outP)e.o++;});
+  return Object.entries(agg).map(([v,e])=>({v,...e})).sort((a,b)=>b.t-a.t||b.i-a.i).slice(0,max);
+}
+function aggDept(scope,today){
+  const agg={}; scope.forEach(r=>{const e=agg[r.dept]||(agg[r.dept]={i:0,o:0,op:0,lt:0,dg:0});
+    if(r._inP)e.i++; if(r._outP)e.o++; if(r._inP&&!r.dateOut){e.op++; if(r.datePlan&&r.datePlan<today)e.lt++;} if(r.danger)e.dg++;});
+  return Object.entries(agg).sort((a,b)=>b[1].i-a[1].i).map(([v,e])=>({v,...e}));
+}
+/* ================= КОНФИГИ ДИАГРАММ ================= */
+function buckets(){
+  const days=Math.round((state.to-state.from)/86400000)+1;
+  if(days<=62)return{step:'d',n:days}; if(days<=400)return{step:'w',n:Math.ceil(days/7)}; return{step:'m',n:Math.ceil(days/30)};
+}
+function bucketKey(d,step){ if(step==='d')return dkey(d);
+  if(step==='w'){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);return dkey(x);}
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function daysCfg(scope){
+  const {step}=buckets(); const labels=[],keys=[]; const cur=new Date(state.from);
+  if(step==='m'){while(cur<=state.to){keys.push(bucketKey(cur,'m'));labels.push(String(cur.getMonth()+1).padStart(2,'0')+'.'+cur.getFullYear());cur.setMonth(cur.getMonth()+1);}}
+  else{const seen=new Set();while(cur<=state.to){const k=bucketKey(cur,step);if(!seen.has(k)){seen.add(k);keys.push(k);labels.push(dmy(cur).slice(0,5));}cur.setDate(cur.getDate()+1);}}
+  const inA=Array(keys.length).fill(0), outA=Array(keys.length).fill(0), idx={}; keys.forEach((k,i)=>idx[k]=i);
+  scope.forEach(r=>{ if(r._inP){const k=bucketKey(r.dateIn,step); if(k in idx)inA[idx[k]]++;} if(r._outP){const k=bucketKey(r.dateOut,step); if(k in idx)outA[idx[k]]++;} });
+  return {type:'bar',data:{labels,datasets:[
+    {type:'bar',label:'Поступило',data:inA,backgroundColor:C_IN,order:2},
+    {type:'line',label:'Устранено',data:outA,borderColor:C_OUT,backgroundColor:C_OUT,tension:.3,pointRadius:2,order:1}]},
+    opt:{scales:{x:{ticks:{maxTicksLimit:20}},y:{beginAtZero:true,ticks:{precision:0}}},layout:{padding:{top:16}}}};
+}
+function groupCfg(scope,key,max){
+  const arr=aggBy(scope,key,max);
+  return {type:'bar',data:{labels:arr.map(a=>a.v),datasets:[
+    {label:'Поступило',data:arr.map(a=>a.i),backgroundColor:C_IN},
+    {label:'Устранено',data:arr.map(a=>a.o),backgroundColor:C_OUT}]},
+    opt:{indexAxis:'y',scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{ticks:{font:{size:10}}}},layout:{padding:{right:34}}}};
+}
+/* ================= РЕНДЕР ЭКРАНА ================= */
 function render(){
   if(!PARSED.length&&!REJECTED)return;
   const scope=currentScope(), today=new Date(); today.setHours(0,0,0,0);
@@ -319,46 +358,17 @@ function render(){
   $('kLate').textContent=fmt(late); $('kDanger').textContent=fmt(scope.filter(r=>r.danger).length);
   $('kPct').textContent=(kIn?Math.round(kOut/kIn*1000)/10:0).toLocaleString('ru-RU')+'%';
   $('recInfo').textContent=`В файле: ${fmt(ROWS.length)} · исключено «Отклонен»: ${fmt(REJECTED)} · в выборке: ${fmt(scope.length)} · период ${dmy(state.from)}–${dmy(state.to)}`;
-  renderDays(scope);
-  renderGroup(scope,'dept','chDept',20);
-  renderGroup(scope,'exec','chExec',12);
-  renderGroup(scope,'char','chChar',20);
-  renderGroup(scope,'uch','chUch',15);
+  mk('chDays',daysCfg(scope));
+  mk('chDept',groupCfg(scope,'dept',20));
+  mk('chExec',groupCfg(scope,'exec',12));
+  mk('chChar',groupCfg(scope,'char',20));
+  mk('chUch',groupCfg(scope,'uch',15));
   renderTopList(scope,'obj','listObj',10);
   renderTopList(scope,'vid','listVid',10);
   renderTable(scope,today);
 }
-function buckets(){
-  const days=Math.round((state.to-state.from)/86400000)+1;
-  if(days<=62)return{step:'d',n:days}; if(days<=400)return{step:'w',n:Math.ceil(days/7)}; return{step:'m',n:Math.ceil(days/30)};
-}
-function bucketKey(d,step){ if(step==='d')return dkey(d);
-  if(step==='w'){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);return dkey(x);}
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-function renderDays(scope){
-  const {step}=buckets(); const labels=[],keys=[]; const cur=new Date(state.from);
-  if(step==='m'){while(cur<=state.to){keys.push(bucketKey(cur,'m'));labels.push(String(cur.getMonth()+1).padStart(2,'0')+'.'+cur.getFullYear());cur.setMonth(cur.getMonth()+1);}}
-  else{const seen=new Set();while(cur<=state.to){const k=bucketKey(cur,step);if(!seen.has(k)){seen.add(k);keys.push(k);labels.push(dmy(cur).slice(0,5));}cur.setDate(cur.getDate()+1);}}
-  const inA=Array(keys.length).fill(0), outA=Array(keys.length).fill(0), idx={}; keys.forEach((k,i)=>idx[k]=i);
-  scope.forEach(r=>{ if(r._inP){const k=bucketKey(r.dateIn,step); if(k in idx)inA[idx[k]]++;} if(r._outP){const k=bucketKey(r.dateOut,step); if(k in idx)outA[idx[k]]++;} });
-  mk('chDays',{type:'bar',data:{labels,datasets:[
-    {type:'bar',label:'Поступило',data:inA,backgroundColor:C_IN,order:2},
-    {type:'line',label:'Устранено',data:outA,borderColor:C_OUT,backgroundColor:C_OUT,tension:.3,pointRadius:2,order:1}]},
-    opt:{scales:{x:{ticks:{maxTicksLimit:20}},y:{beginAtZero:true,ticks:{precision:0}}},layout:{padding:{top:16}}}});
-}
-function renderGroup(scope,key,canvas,max){
-  const agg={}; scope.forEach(r=>{const v=r[key];const e=agg[v]||(agg[v]={i:0,o:0});if(r._inP)e.i++;if(r._outP)e.o++;});
-  const arr=Object.entries(agg).map(([v,e])=>({v,...e})).sort((a,b)=>(b.i+b.o)-(a.i+a.o)).slice(0,max);
-  mk(canvas,{type:'bar',data:{labels:arr.map(a=>a.v),datasets:[
-    {label:'Поступило',data:arr.map(a=>a.i),backgroundColor:C_IN},
-    {label:'Устранено',data:arr.map(a=>a.o),backgroundColor:C_OUT}]},
-    opt:{indexAxis:'y',scales:{x:{beginAtZero:true,ticks:{precision:0}}},layout:{padding:{right:34}}}});
-}
-/* ===== ТОП-СПИСКИ (объекты, виды дефекта) — широкие карточки ===== */
 function renderTopList(scope,key,elId,max){
-  const agg={};
-  scope.forEach(r=>{const v=r[key];const e=agg[v]||(agg[v]={t:0,i:0,o:0});e.t++;if(r._inP)e.i++;if(r._outP)e.o++;});
-  const arr=Object.entries(agg).map(([v,e])=>({v,...e})).sort((a,b)=>b.t-a.t||b.i-a.i).slice(0,max);
+  const arr=aggTop(scope,key,max);
   const mx=arr.length?arr[0].t:1;
   $(elId).innerHTML=arr.map((a,i)=>`<div class="tl-row" title="${esc(a.v)}">
       <span class="tl-rank">${i+1}</span>
@@ -371,16 +381,150 @@ function renderTopList(scope,key,elId,max){
     </div>`).join('')||'<div class="muted">Нет данных в выборке</div>';
 }
 function renderTable(scope,today){
-  const agg={}; scope.forEach(r=>{const e=agg[r.dept]||(agg[r.dept]={i:0,o:0,op:0,lt:0,dg:0});
-    if(r._inP)e.i++; if(r._outP)e.o++; if(r._inP&&!r.dateOut){e.op++; if(r.datePlan&&r.datePlan<today)e.lt++;} if(r.danger)e.dg++;});
+  const rows=aggDept(scope,today);
   const tb=$('tbl').tBodies[0];
-  tb.innerHTML=Object.entries(agg).sort((a,b)=>b[1].i-a[1].i).map(([v,e])=>
-    `<tr><td>${v}</td><td>${fmt(e.i)}</td><td>${fmt(e.o)}</td><td>${fmt(e.op)}</td><td>${fmt(e.lt)}</td><td>${fmt(e.dg)}</td><td>${e.i?Math.round(e.o/e.i*1000)/10:0}%</td></tr>`).join('')
+  tb.innerHTML=rows.map(e=>
+    `<tr><td>${e.v}</td><td>${fmt(e.i)}</td><td>${fmt(e.o)}</td><td>${fmt(e.op)}</td><td>${fmt(e.lt)}</td><td>${fmt(e.dg)}</td><td>${e.i?Math.round(e.o/e.i*1000)/10:0}%</td></tr>`).join('')
     ||'<tr><td colspan="7" class="muted">Нет данных в выборке</td></tr>';
 }
 function mk(id,cfg){ if(CH[id])CH[id].destroy();
   CH[id]=new Chart($(id),{type:cfg.type,data:cfg.data,options:Object.assign({responsive:true,maintainAspectRatio:false,
     plugins:{legend:{position:'top'}},interaction:{mode:'index',intersect:false}},cfg.opt||{})}); }
+/* ================= PDF: КИРИЛЛИЧЕСКИЙ ШРИФТ ================= */
+async function fetchB64(url){
+  const r=await fetch(url); if(!r.ok) throw new Error('HTTP '+r.status);
+  const buf=await r.arrayBuffer();
+  const u=new Uint8Array(buf); let s=''; const C=0x8000;
+  for(let i=0;i<u.length;i+=C) s+=String.fromCharCode.apply(null,u.subarray(i,i+C));
+  return btoa(s);
+}
+async function loadCyrFont(pdf){
+  const sources=[
+    ['https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/ptsans/PT_Sans-Web-Regular.ttf',
+     'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/ptsans/PT_Sans-Web-Bold.ttf'],
+    ['https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf',
+     'https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans-Bold.ttf']
+  ];
+  for(const [nU,bU] of sources){
+    try{
+      const [n,b]=await Promise.all([fetchB64(nU),fetchB64(bU)]);
+      pdf.addFileToVFS('cyr.ttf',n);  pdf.addFont('cyr.ttf','Cyr','normal');
+      pdf.addFileToVFS('cyrb.ttf',b); pdf.addFont('cyrb.ttf','Cyr','bold');
+      return 'Cyr';
+    }catch(e){ /* пробуем следующий источник */ }
+  }
+  return null;
+}
+/* ================= PDF: OFFSCREEN-ДИАГРАММЫ (точный размер) ================= */
+function chartImg(cfg,w,h){
+  const c=document.createElement('canvas');
+  c.width=w; c.height=h; c.style.width=w+'px'; c.style.height=h+'px';   /* атрибуты И style — иначе Chart.js берёт 300x150 */
+  const opt=Object.assign({},cfg.opt);
+  if(opt.scales){ ['x','y'].forEach(k=>{ if(opt.scales[k]&&opt.scales[k].ticks)
+    opt.scales[k]=Object.assign({},opt.scales[k],{ticks:Object.assign({},opt.scales[k].ticks,{font:{size:11}})}); }); }
+  const ch=new Chart(c,{type:cfg.type,data:cfg.data,options:Object.assign({},opt,{
+    responsive:false,animation:false,devicePixelRatio:2,
+    plugins:Object.assign({legend:{position:'top',labels:{boxWidth:12,font:{size:12}}}},opt.plugins||{})})});
+  const url=ch.toBase64Image('image/png',1);
+  ch.destroy();
+  return url;
+}
+/* ================= ЭКСПОРТ В PDF ================= */
+async function exportPdf(){
+  if(!window.jspdf){alert('Библиотека jsPDF не загрузилась (нужен доступ к CDN).');return;}
+  const btn=$('btnPdf'), old=btn.textContent;
+  btn.disabled=true; btn.textContent='⏳ Генерация PDF…';
+  await new Promise(r=>setTimeout(r,60));
+  try{
+    const scope=currentScope(), today=new Date(); today.setHours(0,0,0,0);
+    const kIn=scope.filter(r=>r._inP).length, kOut=scope.filter(r=>r._outP).length;
+    const open=scope.filter(r=>r._inP&&!r.dateOut);
+    const late=open.filter(r=>r.datePlan&&r.datePlan<today).length;
+    const danger=scope.filter(r=>r.danger).length;
+    const pct=(kIn?Math.round(kOut/kIn*1000)/10:0).toLocaleString('ru-RU')+'%';
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+    const FONT=await loadCyrFont(pdf);
+    if(!FONT){alert('Не удалось загрузить кириллический шрифт с CDN (проверьте интернет). PDF не сформирован.');return;}
+    const F=(st,sz)=>{pdf.setFont(FONT,st);pdf.setFontSize(sz);};
+    const PT=(s,x,y,o)=>pdf.text(String(s).replace(/\u00A0/g,' '),x,y,o);   /* NBSP -> пробел */
+    const M=10, PW=277;
+    /* ---------- стр.1: титул, KPI, дневной график ---------- */
+    F('bold',16); pdf.setTextColor(15,23,42); PT('Дашборд дефектов СКПДИ', M, 14);
+    F('normal',9); pdf.setTextColor(100,116,139); PT($('recInfo').textContent, M, 20);
+    const kpis=[['Поступило',fmt(kIn),37,99,235],['Устранено',fmt(kOut),22,163,74],['В работе',fmt(open.length),15,23,42],
+                ['Просрочено',fmt(late),220,38,38],['Аварийноопасные',fmt(danger),220,38,38],['% устранения',pct,22,163,74]];
+    const bw=(PW-5*4)/6; let x=M;
+    kpis.forEach(k=>{
+      pdf.setFillColor(248,250,252); pdf.setDrawColor(226,232,240);
+      pdf.roundedRect(x,24,bw,24,2,2,'FD');
+      F('normal',8); pdf.setTextColor(100,116,139); PT(k[0], x+3, 30);
+      F('bold',15); pdf.setTextColor(k[2],k[3],k[4]); PT(k[1], x+3, 42);
+      x+=bw+4;
+    });
+    F('bold',11); pdf.setTextColor(15,23,42); PT('Динамика по дням: поступление и устранение дефектов', M, 55);
+    const DW=1100, DH=430;
+    pdf.addImage(chartImg(daysCfg(scope),DW,DH),'PNG',M,58,PW,PW*DH/DW);
+    /* ---------- стр.2: четыре диаграммы 2x2 ---------- */
+    pdf.addPage();
+    const sw=(PW-4)/2, GW=560, GH=320, gh=sw*GH/GW;
+    [['По территориальным отделам',groupCfg(scope,'dept',20),M,14],
+     ['По исполнителям',groupCfg(scope,'exec',12),M+sw+4,14],
+     ['По характеру дефекта',groupCfg(scope,'char',20),M,104],
+     ['По участкам (AH «Участок»)',groupCfg(scope,'uch',15),M+sw+4,104]].forEach(s=>{
+      F('bold',11); pdf.setTextColor(15,23,42); PT(s[0], s[2], s[3]);
+      pdf.addImage(chartImg(s[1],GW,GH),'PNG',s[2],s[3]+3,sw,gh);
+    });
+    /* ---------- стр.3: топ-списки текстом, две колонки ---------- */
+    pdf.addPage();
+    [['Топ-10 объектов',aggTop(scope,'obj',10),M],['Топ-10 видов дефекта',aggTop(scope,'vid',10),M+sw+4]].forEach(c=>{
+      F('bold',12); pdf.setTextColor(15,23,42); PT(c[0], c[2], 16);
+      let y=24;
+      c[1].forEach((a,i)=>{
+        let lines=pdf.splitTextToSize(String(a.v).replace(/\u00A0/g,' '), sw-26);
+        if(lines.length>2){lines=lines.slice(0,2);lines[1]=lines[1]+'…';}
+        F('bold',9); pdf.setTextColor(37,99,235); PT(String(i+1)+'.', c[2], y+3);
+        F('normal',9.5); pdf.setTextColor(15,23,42); pdf.text(lines, c[2]+6, y+3);
+        const hTxt=lines.length*4.4;
+        F('normal',8); pdf.setTextColor(100,116,139); PT(`поступило ${fmt(a.i)} · устранено ${fmt(a.o)}`, c[2]+6, y+4+hTxt);
+        F('bold',11); pdf.setTextColor(15,23,42); PT(fmt(a.t), c[2]+sw, y+4, {align:'right'});
+        y+=hTxt+9;
+        pdf.setDrawColor(226,232,240); pdf.line(c[2], y-4.5, c[2]+sw, y-4.5);
+      });
+    });
+    /* ---------- стр.4+: сводная таблица вектором ---------- */
+    pdf.addPage();
+    const deptW=95, numW=(PW-deptW)/6;
+    const colX=[M, M+deptW+numW, M+deptW+numW*2, M+deptW+numW*3, M+deptW+numW*4, M+deptW+numW*5, M+PW];
+    const heads=['Терр. отдел','Поступило','Устранено','В работе','Просрочено','Аварийные','% устранения'];
+    let y=0;
+    const thead=()=>{ F('bold',12); pdf.setTextColor(15,23,42); PT('Сводная таблица по территориальным отделам', M, y+6); y+=10;
+      pdf.setFillColor(241,245,249); pdf.rect(M,y,PW,8,'F');
+      F('normal',8.5); pdf.setTextColor(71,85,105);
+      heads.forEach((h,ci)=>PT(h, colX[ci]-(ci?2:0), y+5.5, ci?{align:'right'}:undefined));
+      y+=8; };
+    thead();
+    aggDept(scope,today).forEach((e,idx)=>{
+      if(y>186){ pdf.addPage(); y=0; thead(); }
+      if(idx%2){ pdf.setFillColor(248,250,252); pdf.rect(M,y,PW,8,'F'); }
+      F('normal',9); pdf.setTextColor(15,23,42);
+      let nm=pdf.splitTextToSize(String(e.v).replace(/\u00A0/g,' '), deptW-4); if(nm.length>1){nm=[nm[0]+'…'];}
+      pdf.text(nm[0], M+2, y+5.5);
+      [fmt(e.i),fmt(e.o),fmt(e.op),fmt(e.lt),fmt(e.dg),(e.i?Math.round(e.o/e.i*1000)/10:0)+'%']
+        .forEach((v,ci)=>PT(v, colX[ci+1]-2, y+5.5, {align:'right'}));
+      y+=8;
+    });
+    /* ---------- колонтитулы ---------- */
+    const n=pdf.getNumberOfPages();
+    for(let i=1;i<=n;i++){ pdf.setPage(i);
+      F('normal',8); pdf.setTextColor(148,163,184);
+      PT('Дашборд дефектов СКПДИ', M, 205);
+      PT('Сформировано: '+new Date().toLocaleString('ru-RU'), M+PW/2, 205, {align:'center'});
+      PT(`Стр. ${i} из ${n}`, M+PW, 205, {align:'right'}); }
+    pdf.save('dashboard_defekty.pdf');
+  }catch(e){ console.error(e); alert('Не удалось сформировать PDF: '+e.message); }
+  finally{ btn.disabled=false; btn.textContent=old; }
+}
 /* ================= СОБЫТИЯ ================= */
 $('drop').onclick=()=>$('file').click();
 $('file').onchange=e=>{if(e.target.files[0])handleFile(e.target.files[0]);};
@@ -410,6 +554,7 @@ $('btnReset').onclick=()=>{['fDept','fExec','fChar','fType','fObjType'].forEach(
 document.querySelectorAll('[data-all],[data-none]').forEach(a=>a.onclick=e=>{e.preventDefault();
   [...$(a.dataset.all||a.dataset.none).options].forEach(o=>o.selected=!!a.dataset.all);render();});
 $('btnPrint').onclick=()=>window.print();
+$('btnPdf').onclick=exportPdf;
 $('btnCsv').onclick=()=>{const scope=currentScope();
   const rows=[HEADERS].concat(scope.map(r=>r.row));
   const csv='\uFEFF'+rows.map(r=>r.map(c=>{const s=c==null?'':String(c);return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(';')).join('\r\n');
@@ -420,16 +565,16 @@ $('btnDemo').onclick=()=>{
   const exec=['МБУ "КГС"','ООО УК "Феникс"','ООО "УК НКС"','ООО «ОБРАЗЦОВО ЮГ»','РСО','Иные УК'];
   const chr=['Иное','Гарантийный','Текущий','Аварийноопасный'];
   const typ=['Дефект полотна','Дефекты ОГХ','Дефект ДИП','Уборка'];
-  const objtyp=['Участок автомобильной дороги','Дворовая территория','Объект благоустройства'];
-  const uch=['Южный / Вокзальная','Институтская / Панфилова','Турецкий городок','ЖК Мортон','Пойма','Ильинское-Усово','ЖК Красногорский','Ч-2'];
+  const objtyp=['Участок автомобильной дороги','Дворовая территория','Общественное пространство'];
+  const uch=['Южный / Вокзальная','Институтская / Панфилова','Турецкий городок','ЖК Красногорский','Пойма','Ильинское-Усово','Теплый бетон','Ч-2','Изумрудные холмы','Райцентр / СГШ'];
   const obj=['Архангельское поселок д. 31, 32, 33, 34, 35, 36, 37, 38, 39, 40 (ТО Ильинское)','Новый поселок д. 4, 6, 7, 8 к. 1, 2, 3, д. 9, 10, 11 (ТО Ильинское)','го Красногорск, с.Петрово-Дальнее, пос. Ленинский, д.20 , д. 21, д. 22, д. 23','го Красногорск, с.Петрово-Дальнее, пос.Ленинский, д.28, д.29, д.30','Архангельское поселок д. 1, 26, 27, 28, 29, 30 (ТО Ильинское)','Панфилова улица д. 12, 14, 22, 24 (пгт. Нахабино)','Панфилова улица д. 15, 17, 19 (пгт. Нахабино)','Школьная улица д. 8 (пгт. Нахабино)','Институтская улица д. 10, 10А','Заводская улица д. 18 к. 1, 2, 3'];
-  const vid=['Деформации и разрушения','Выбоины','Граффити','Дефект ДИП','Уборка','Переполненные урны','Выступающие гвозди, болты, арматура','Игровой элемент ДИП требует покраски'];
+  const vid=['Деформации и разрушения','Выбоины','Граффити','3.1 Вандальные надписи на стенах зданиях, заборах и т.д. (кроме ДИП)','Уборка','Переполненные урны','Выступающие гвозди, болты, арматура','Износ дорожной разметки'];
   const rnd=n=>Math.floor(Math.random()*n);
   HEADERS=['ID','Дата выявления дефекта','Статус','Выявлен в процессе проверки','Тип объекта','Объект','Тип','Вид дефекта','Терр.отдел','Исполнитель','Характер дефекта','Участок','Дата устранения дефекта (план)','Дата устранения дефекта (факт)','Признак Аварийноопасный'];
   const rows=[]; const now=new Date();
   for(let i=1;i<=400;i++){const di=new Date(now- rnd(180)*86400000); const rej=Math.random()<.25; const done=Math.random()<.72;
     const do_=(!rej&&done)?new Date(Math.min(now,+di+rnd(25)*86400000)):null; const ch=chr[rnd(4)]; const ot=objtyp[rnd(3)];
-    rows.push([i,dmy(di),rej?'Отклонен':(done?'Устранен':'Принят'),'',ot,obj[rnd(obj.length)],typ[rnd(4)],vid[rnd(vid.length)],dept[rnd(5)],exec[rnd(6)],ch,uch[rnd(8)],dmy(new Date(+di+15*86400000)),do_?dmy(do_):'',ch==='Аварийноопасный'?'Да':'Нет']);}
+    rows.push([i,dmy(di),rej?'Отклонен':(done?'Устранен':'Принят'),'',ot,obj[rnd(obj.length)],typ[rnd(4)],vid[rnd(vid.length)],dept[rnd(5)],exec[rnd(6)],ch,uch[rnd(10)],dmy(new Date(+di+15*86400000)),do_?dmy(do_):'',ch==='Аварийноопасный'?'Да':'Нет']);}
   ROWS=rows; autoMap(); fillMapSelects(); rebuild(); setPeriodAll(); render();};
 </script>
 </body>
