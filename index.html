@@ -279,7 +279,7 @@ function fillFilterOptions(){
   [['fDept','dept'],['fExec','exec'],['fChar','char'],['fType','type'],['fObjType','objtype']].forEach(([id,key])=>{
     const sel=$(id), keep=new Set([...sel.selectedOptions].map(o=>o.value));
     const cnt={}; PARSED.forEach(r=>cnt[r[key]]=(cnt[r[key]]||0)+1);
-    sel.innerHTML=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).map(v=>`<option value="${v}" ${keep.has(v)?'selected':''}>${v} (${cnt[v]})</option>`).join('');
+    sel.innerHTML=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).map(v=>`<option value="${esc(v)}" ${keep.has(v)?'selected':''}>${esc(v)} (${cnt[v]})</option>`).join('');
   });
 }
 const selSet=id=>new Set([...$(id).selectedOptions].map(o=>o.value));
